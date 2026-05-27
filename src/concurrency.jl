@@ -14,7 +14,7 @@ Block until the client can make another API call without exceeding its RPM
 cap. Updates the sliding window in-place. Safe for concurrent callers thanks
 to the per-client lock.
 """
-function await_slot!(client::AnthropicClient)
+function await_slot!(client::Client)
     while true
         wait_secs = lock(client.rpm_lock) do
             now = time()

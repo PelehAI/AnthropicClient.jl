@@ -30,7 +30,7 @@ function price_for(model::AbstractString)
         return _PRICES[model]
     end
     # Conservative fallback: Sonnet-class. Logged once-ish via @warn.
-    @warn "LLMClient: unknown model in pricing table; using Sonnet rates as fallback" model
+    @warn "AnthropicClient: unknown model in pricing table; using Sonnet rates as fallback" model
     return _PRICES["claude-sonnet-4-5"]
 end
 

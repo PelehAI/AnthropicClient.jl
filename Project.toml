@@ -1,4 +1,4 @@
-name = "LLMClient"
+name = "AnthropicClient"
 uuid = "e82deec3-d3b5-4b85-aba1-b8e1f470db1f"
 authors = ["Yoni Nazarathy <yoni@accumulationpoint.com>"]
 version = "0.1.0"

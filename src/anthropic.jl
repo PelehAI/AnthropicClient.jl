@@ -15,7 +15,7 @@ const _API_VERSION = "2023-06-01"
 Build the JSON body for `/v1/messages`. Returns a `Dict{String,Any}` ready to
 hand to JSON3.write. Pure function; no I/O.
 """
-function build_body(client::AnthropicClient;
+function build_body(client::Client;
     system::Union{Nothing, SystemPrompt},
     messages::AbstractVector{Msg},
     max_tokens::Integer,
@@ -52,7 +52,7 @@ function _serialize_messages(messages::AbstractVector{Msg})
     for (i, m) in pairs(messages)
         role = m.role === :user ? "user" :
                m.role === :assistant ? "assistant" :
-               error("LLMClient: unknown role $(m.role); expected :user or :assistant")
+               error("AnthropicClient: unknown role $(m.role); expected :user or :assistant")
         block = Dict{String,Any}("type" => "text", "text" => m.content)
         if m.cache
             block["cache_control"] = Dict{String,Any}("type" => "ephemeral")
@@ -118,8 +118,8 @@ Issue one POST to `/v1/messages` with the standard headers. Handles
 `body` must already be serialisable JSON (typically the return of
 `build_body`).
 """
-function post_messages(client::AnthropicClient, body::AbstractDict; max_retries::Integer=3)
-    has_key(client) || error("LLMClient: ANTHROPIC_API_KEY not set on client")
+function post_messages(client::Client, body::AbstractDict; max_retries::Integer=3)
+    has_key(client) || error("AnthropicClient: ANTHROPIC_API_KEY not set on client")
     url = string(client.base_url, "/v1/messages")
     headers = [
         "x-api-key"         => client.api_key,
@@ -150,19 +150,19 @@ function post_messages(client::AnthropicClient, body::AbstractDict; max_retries:
             # Rate limit. Honour retry-after if present, else exponential backoff.
             retry_after = _retry_after_seconds(resp)
             if attempt > max_retries
-                error("LLMClient: rate limit exceeded after $max_retries retries")
+                error("AnthropicClient: rate limit exceeded after $max_retries retries")
             end
             sleep(retry_after)
             continue
         elseif 500 <= resp.status < 600
             if attempt > max_retries
-                error("LLMClient: server error $(resp.status) after $max_retries retries: $(String(resp.body))")
+                error("AnthropicClient: server error $(resp.status) after $max_retries retries: $(String(resp.body))")
             end
             sleep(min(2.0 ^ attempt, 30.0))
             continue
         else
             # 4xx that isn't 429 — surface the body, don't retry.
-            error("LLMClient: HTTP $(resp.status) from /v1/messages: $(String(resp.body))")
+            error("AnthropicClient: HTTP $(resp.status) from /v1/messages: $(String(resp.body))")
         end
     end
 end

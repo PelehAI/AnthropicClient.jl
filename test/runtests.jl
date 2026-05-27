@@ -1,6 +1,6 @@
 using Test
-using LLMClient
-using LLMClient: build_body, parse_reply, calc_cost, _serialize_messages,
+using AnthropicClient
+using AnthropicClient: build_body, parse_reply, calc_cost, _serialize_messages,
                  _serialize_system, Msg, SystemPrompt, to_msg, to_system,
                  await_slot!, _retry_after_seconds
 using HTTP
@@ -9,7 +9,7 @@ using JSON3
 # All tests in this file are pure functions / wiring-only. None hit the
 # real Anthropic API. Live tests live in test/live/ (not included in CI).
 
-@testset "LLMClient pure-function unit tests" begin
+@testset "AnthropicClient pure-function unit tests" begin
 
     @testset "Msg normalization" begin
         m1 = to_msg(Msg(:user, "hi"))
@@ -33,7 +33,7 @@ using JSON3
     end
 
     @testset "Pricing table + calc_cost" begin
-        p = LLMClient.price_for("claude-haiku-4-5")
+        p = AnthropicClient.price_for("claude-haiku-4-5")
         @test p.input == 1.00
         @test p.output == 5.00
         # 1M input + 1M output @ Haiku = $1 + $5 = $6
@@ -48,7 +48,7 @@ using JSON3
     end
 
     @testset "build_body — simple call" begin
-        client = AnthropicClient(api_key="dummy", model_default="claude-haiku-4-5", rpm=5)
+        client = Client(api_key="dummy", model_default="claude-haiku-4-5", rpm=5)
         body = build_body(client;
             system = nothing,
             messages = [Msg(:user, "hi")],
@@ -65,7 +65,7 @@ using JSON3
     end
 
     @testset "build_body — with system + temperature + model override" begin
-        client = AnthropicClient(api_key="dummy", model_default="claude-haiku-4-5", rpm=5)
+        client = Client(api_key="dummy", model_default="claude-haiku-4-5", rpm=5)
         body = build_body(client;
             system = SystemPrompt("You are X."),
             messages = [Msg(:user, "hi"), Msg(:assistant, "hello"), Msg(:user, "again")],
@@ -85,7 +85,7 @@ using JSON3
     end
 
     @testset "build_body — cache markers" begin
-        client = AnthropicClient(api_key="dummy")
+        client = Client(api_key="dummy")
         body = build_body(client;
             system = SystemPrompt("Huge schema..."; cache=true),
             messages = [Msg(:user, "short")],
@@ -98,7 +98,7 @@ using JSON3
     end
 
     @testset "build_body — message-level cache marker" begin
-        client = AnthropicClient(api_key="dummy")
+        client = Client(api_key="dummy")
         body = build_body(client;
             system = nothing,
             messages = [Msg(:user, "long-context"; cache=true), Msg(:user, "real-question")],
@@ -111,7 +111,7 @@ using JSON3
     end
 
     @testset "build_body — unknown role errors" begin
-        client = AnthropicClient(api_key="dummy")
+        client = Client(api_key="dummy")
         @test_throws ErrorException build_body(client;
             system = nothing,
             messages = [Msg(:tool, "x")],
@@ -196,7 +196,7 @@ using JSON3
     end
 
     @testset "RPM semaphore — under cap is instant" begin
-        client = AnthropicClient(api_key="dummy", rpm=50)
+        client = Client(api_key="dummy", rpm=50)
         t0 = time()
         for _ in 1:5
             await_slot!(client)
@@ -206,7 +206,7 @@ using JSON3
 
     @testset "RPM semaphore — over cap blocks" begin
         # Tight cap, then issue 1 more than cap — last should block.
-        client = AnthropicClient(api_key="dummy", rpm=2)
+        client = Client(api_key="dummy", rpm=2)
         # Fill the window with two "old" timestamps then check that the
         # next slot waits. We can't easily fast-forward time, so just check
         # that the window state evolves correctly under instant calls:
@@ -221,30 +221,30 @@ using JSON3
     end
 
     @testset "Budget — under cap accepts" begin
-        client = AnthropicClient(api_key="dummy")
+        client = Client(api_key="dummy")
         b = Budget(client; max_usd=1.0)
         @test spent_usd(b) == 0.0
         @test b.max_usd == 1.0
     end
 
     @testset "Budget — pre-call check throws when already at cap" begin
-        client = AnthropicClient(api_key="dummy")
+        client = Client(api_key="dummy")
         b = Budget(client; max_usd=0.0)
         @test_throws BudgetExceeded chat(b; messages=[(:user, "x")], max_tokens=32)
     end
 
     @testset "has_key — keyless client returns false" begin
-        @test !has_key(AnthropicClient(api_key=""))
-        @test  has_key(AnthropicClient(api_key="sk-ant-anything"))
+        @test !has_key(Client(api_key=""))
+        @test  has_key(Client(api_key="sk-ant-anything"))
     end
 
     @testset "chat — keyless client errors" begin
-        client = AnthropicClient(api_key="")
+        client = Client(api_key="")
         @test_throws ErrorException chat(client; messages=[(:user, "x")], max_tokens=8)
     end
 
     @testset "chat — missing messages errors" begin
-        client = AnthropicClient(api_key="dummy")
+        client = Client(api_key="dummy")
         @test_throws ErrorException chat(client; max_tokens=8)
     end
 
@@ -303,8 +303,8 @@ using JSON3
         @test occursin("BudgetExceeded", msg)
     end
 
-    @testset "AnthropicClient — show never leaks api_key" begin
-        c1 = AnthropicClient(api_key="sk-ant-supersecret-DEADBEEF", rpm=5)
+    @testset "Client — show never leaks api_key" begin
+        c1 = Client(api_key="sk-ant-supersecret-DEADBEEF", rpm=5)
         io = IOBuffer(); show(io, c1)
         s1 = String(take!(io))
         @test !occursin("supersecret", s1)
@@ -314,14 +314,14 @@ using JSON3
         @test occursin("rpm=5", s1)
 
         # Short key still masked.
-        c2 = AnthropicClient(api_key="abc", rpm=5)
+        c2 = Client(api_key="abc", rpm=5)
         io = IOBuffer(); show(io, c2)
         s2 = String(take!(io))
         @test !occursin("abc", s2)
         @test occursin("***", s2)
 
         # Empty key shows <unset>.
-        c3 = AnthropicClient(api_key="", rpm=5)
+        c3 = Client(api_key="", rpm=5)
         io = IOBuffer(); show(io, c3)
         s3 = String(take!(io))
         @test occursin("<unset>", s3)
@@ -393,15 +393,15 @@ using JSON3
     @testset "chat_async — returns a Task without making a call" begin
         # Keyless client → chat throws. chat_async still returns a Task; the
         # error surfaces when you fetch.
-        client = AnthropicClient(api_key="")
+        client = Client(api_key="")
         t = chat_async(client; messages=[(:user, "x")], max_tokens=8)
         @test t isa Task
         @test_throws TaskFailedException fetch(t)
     end
 
     @testset "Two clients have independent RPM windows" begin
-        c1 = AnthropicClient(api_key="dummy", rpm=2)
-        c2 = AnthropicClient(api_key="dummy", rpm=2)
+        c1 = Client(api_key="dummy", rpm=2)
+        c2 = Client(api_key="dummy", rpm=2)
         await_slot!(c1)
         await_slot!(c1)
         @test length(c1.rpm_window[]) == 2

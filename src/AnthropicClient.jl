@@ -1,6 +1,6 @@
-module LLMClient
+module AnthropicClient
 
-# LLMClient.jl — minimal, fast Julia client for Anthropic's Messages API.
+# AnthropicClient.jl — minimal, fast Julia client for Anthropic's Messages API.
 # See README.md for the design rationale.
 
 using HTTP
@@ -13,7 +13,7 @@ include("anthropic.jl")
 
 # ------------------- Public API ---------------------------------------------
 
-export AnthropicClient, has_key,
+export Client, has_key,
        Msg, SystemPrompt,
        Reply,
        Budget, BudgetExceeded, spent_usd,
@@ -37,7 +37,7 @@ counts, and computed `cost_usd`.
 - `temperature` — optional Float; Anthropic default is 1.0.
 - `max_retries` — for 429 / 5xx retries; default 3.
 """
-function chat(client::AnthropicClient;
+function chat(client::Client;
     system   = nothing,
     messages = nothing,
     max_tokens::Integer,
@@ -45,7 +45,7 @@ function chat(client::AnthropicClient;
     temperature::Union{Nothing, Real}     = nothing,
     max_retries::Integer = 3,
 )
-    messages === nothing && error("LLMClient.chat: `messages` is required")
+    messages === nothing && error("AnthropicClient.chat: `messages` is required")
     msgs_normalized = Msg[to_msg(m) for m in messages]
     sys_normalized  = to_system(system)
     body = build_body(client;
@@ -66,7 +66,7 @@ Returns a Task running `chat` on a background thread. The task respects the
 client's RPM cap through the shared semaphore — many concurrent tasks share
 one rate budget.
 """
-function chat_async(client::AnthropicClient; kwargs...)
+function chat_async(client::Client; kwargs...)
     Threads.@spawn chat(client; kwargs...)
 end
 

@@ -1,7 +1,7 @@
-# Core types: AnthropicClient, Message, Reply, Budget.
+# Core types: Client, Message, Reply, Budget.
 
 """
-    AnthropicClient(; api_key, model_default, rpm, base_url, timeout)
+    Client(; api_key, model_default, rpm, base_url, timeout)
 
 A reusable client for Anthropic's Messages API. Maintains an HTTP keep-alive
 connection pool and a rate-limit semaphore shared across all calls.
@@ -15,7 +15,7 @@ Fields:
 - `timeout::Int`              — seconds, per-call HTTP timeout.
 - internal: rate-limit window state + lock.
 """
-struct AnthropicClient
+struct Client
     api_key::String
     model_default::String
     rpm::Int
@@ -26,14 +26,14 @@ struct AnthropicClient
     rpm_lock::ReentrantLock
 end
 
-function AnthropicClient(;
+function Client(;
     api_key::AbstractString       = get(ENV, "ANTHROPIC_API_KEY", ""),
     model_default::AbstractString = "claude-haiku-4-5",
     rpm::Integer                  = 5,
     base_url::AbstractString      = "https://api.anthropic.com",
     timeout::Integer              = 120,
 )
-    return AnthropicClient(
+    return Client(
         String(api_key),
         String(model_default),
         Int(rpm),
@@ -45,14 +45,14 @@ function AnthropicClient(;
 end
 
 "Has-key sanity check. Stub mode is when no api_key is set."
-has_key(c::AnthropicClient) = !isempty(c.api_key)
+has_key(c::Client) = !isempty(c.api_key)
 
 # Custom show — never leak the api_key in a repr or error message.
-function Base.show(io::IO, c::AnthropicClient)
+function Base.show(io::IO, c::Client)
     masked = isempty(c.api_key) ? "<unset>" :
              length(c.api_key) <= 8 ? "***" :
              string(first(c.api_key, 4), "…", last(c.api_key, 4))
-    print(io, "AnthropicClient(api_key=", masked,
+    print(io, "AnthropicClient.Client(api_key=", masked,
               ", model_default=", repr(c.model_default),
               ", rpm=", c.rpm, ")")
 end
@@ -131,12 +131,12 @@ Wrap a client with a per-session spend cap. Calls via `chat(budget; ...)`
 deduct from the budget; over-cap throws `BudgetExceeded`.
 """
 mutable struct Budget
-    client::AnthropicClient
+    client::Client
     max_usd::Float64
     used_usd::Float64
     lock::ReentrantLock
 end
-Budget(client::AnthropicClient; max_usd::Real = 1.0) =
+Budget(client::Client; max_usd::Real = 1.0) =
     Budget(client, Float64(max_usd), 0.0, ReentrantLock())
 
 spent_usd(b::Budget) = b.used_usd

@@ -2,7 +2,8 @@ using Test
 using LLMClient
 using LLMClient: build_body, parse_reply, calc_cost, _serialize_messages,
                  _serialize_system, Msg, SystemPrompt, to_msg, to_system,
-                 await_slot!
+                 await_slot!, _retry_after_seconds
+using HTTP
 using JSON3
 
 # All tests in this file are pure functions / wiring-only. None hit the
@@ -230,6 +231,184 @@ using JSON3
         client = AnthropicClient(api_key="dummy")
         b = Budget(client; max_usd=0.0)
         @test_throws BudgetExceeded chat(b; messages=[(:user, "x")], max_tokens=32)
+    end
+
+    @testset "has_key — keyless client returns false" begin
+        @test !has_key(AnthropicClient(api_key=""))
+        @test  has_key(AnthropicClient(api_key="sk-ant-anything"))
+    end
+
+    @testset "chat — keyless client errors" begin
+        client = AnthropicClient(api_key="")
+        @test_throws ErrorException chat(client; messages=[(:user, "x")], max_tokens=8)
+    end
+
+    @testset "chat — missing messages errors" begin
+        client = AnthropicClient(api_key="dummy")
+        @test_throws ErrorException chat(client; max_tokens=8)
+    end
+
+    @testset "parse_reply — stop_reason variants" begin
+        for (raw, sym) in [("end_turn",      :end_turn),
+                           ("max_tokens",    :max_tokens),
+                           ("stop_sequence", :stop_sequence),
+                           ("tool_use",      :tool_use),
+                           ("refusal",       :other),       # unknown → :other
+                           ("anything-else", :other)]
+            json = JSON3.read("""
+            {"model":"claude-haiku-4-5","content":[{"type":"text","text":""}],
+             "stop_reason":"$raw","usage":{"input_tokens":1,"output_tokens":1}}
+            """)
+            @test parse_reply(json, "claude-haiku-4-5").stop_reason === sym
+        end
+    end
+
+    @testset "parse_reply — missing model field falls back to requested" begin
+        json = JSON3.read("""
+        {"content":[{"type":"text","text":"x"}],"stop_reason":"end_turn",
+         "usage":{"input_tokens":1,"output_tokens":1}}
+        """)
+        rep = parse_reply(json, "claude-haiku-4-5")
+        @test rep.model == "claude-haiku-4-5"
+    end
+
+    @testset "_retry_after_seconds — parses header" begin
+        # Synthesise a Response with retry-after header.
+        resp = HTTP.Response(429, ["retry-after" => "12"]; body=UInt8[])
+        @test _retry_after_seconds(resp) ≈ 12.0
+
+        # Case-insensitive lookup.
+        resp2 = HTTP.Response(429, ["Retry-After" => "3.5"]; body=UInt8[])
+        @test _retry_after_seconds(resp2) ≈ 3.5
+
+        # Missing header → conservative default 5.0.
+        resp3 = HTTP.Response(429, Pair{String,String}[]; body=UInt8[])
+        @test _retry_after_seconds(resp3) == 5.0
+
+        # Non-numeric / zero → fall back to default.
+        resp4 = HTTP.Response(429, ["retry-after" => "garbage"]; body=UInt8[])
+        @test _retry_after_seconds(resp4) == 5.0
+        resp5 = HTTP.Response(429, ["retry-after" => "0"]; body=UInt8[])
+        @test _retry_after_seconds(resp5) == 5.0
+    end
+
+    @testset "BudgetExceeded — showerror renders dollars" begin
+        e = BudgetExceeded(0.123, 0.10, 0.045)
+        io = IOBuffer()
+        showerror(io, e)
+        msg = String(take!(io))
+        @test occursin("0.123", msg)
+        @test occursin("0.1", msg)
+        @test occursin("0.045", msg)
+        @test occursin("BudgetExceeded", msg)
+    end
+
+    @testset "AnthropicClient — show never leaks api_key" begin
+        c1 = AnthropicClient(api_key="sk-ant-supersecret-DEADBEEF", rpm=5)
+        io = IOBuffer(); show(io, c1)
+        s1 = String(take!(io))
+        @test !occursin("supersecret", s1)
+        @test !occursin("DEADBEEF", s1)
+        @test occursin("sk-a", s1)             # first 4
+        @test occursin("BEEF", s1)             # last 4
+        @test occursin("rpm=5", s1)
+
+        # Short key still masked.
+        c2 = AnthropicClient(api_key="abc", rpm=5)
+        io = IOBuffer(); show(io, c2)
+        s2 = String(take!(io))
+        @test !occursin("abc", s2)
+        @test occursin("***", s2)
+
+        # Empty key shows <unset>.
+        c3 = AnthropicClient(api_key="", rpm=5)
+        io = IOBuffer(); show(io, c3)
+        s3 = String(take!(io))
+        @test occursin("<unset>", s3)
+    end
+
+    @testset "Reply — show is compact and includes cost" begin
+        rep = Reply("hello", "claude-haiku-4-5", :end_turn, 100, 0, 0, 20, 0.0002, nothing)
+        io = IOBuffer(); show(io, rep)
+        s = String(take!(io))
+        @test occursin("hello", s)
+        @test occursin("claude-haiku-4-5", s)
+        @test occursin("in=100", s)
+        @test occursin("out=20", s)
+        @test occursin("0.0002", s)
+
+        # Long text gets truncated.
+        long = "x" ^ 200
+        rep2 = Reply(long, "m", :end_turn, 1, 0, 0, 1, 0.0, nothing)
+        io = IOBuffer(); show(io, rep2)
+        s2 = String(take!(io))
+        @test length(s2) < 200
+        @test occursin("...", s2)
+    end
+
+    @testset "parse_reply — missing usage block defaults to zero tokens" begin
+        json = JSON3.read("""
+        {"model":"claude-haiku-4-5","content":[{"type":"text","text":"x"}],
+         "stop_reason":"end_turn"}
+        """)
+        rep = parse_reply(json, "claude-haiku-4-5")
+        @test rep.input_tokens == 0
+        @test rep.output_tokens == 0
+        @test rep.cached_read_tokens == 0
+        @test rep.cached_write_tokens == 0
+        @test rep.cost_usd == 0.0
+    end
+
+    @testset "parse_reply — non-text content blocks are skipped" begin
+        json = JSON3.read("""
+        {"model":"claude-haiku-4-5",
+         "content":[
+            {"type":"text","text":"answer is "},
+            {"type":"tool_use","id":"t1","name":"calc","input":{}},
+            {"type":"text","text":"42"}
+         ],
+         "stop_reason":"tool_use",
+         "usage":{"input_tokens":10,"output_tokens":5}}
+        """)
+        rep = parse_reply(json, "claude-haiku-4-5")
+        @test rep.text == "answer is 42"
+        @test rep.stop_reason == :tool_use
+    end
+
+    @testset "known_models — sorted, non-empty, includes our defaults" begin
+        ms = known_models()
+        @test ms isa Vector{String}
+        @test issorted(ms)
+        @test "claude-haiku-4-5" in ms
+        @test "claude-sonnet-4-5" in ms
+        @test "claude-opus-4-7" in ms
+        # Every entry must have a price entry (round-trip).
+        for m in ms
+            p = price_for(m)
+            @test p.input > 0
+            @test p.output > 0
+        end
+    end
+
+    @testset "chat_async — returns a Task without making a call" begin
+        # Keyless client → chat throws. chat_async still returns a Task; the
+        # error surfaces when you fetch.
+        client = AnthropicClient(api_key="")
+        t = chat_async(client; messages=[(:user, "x")], max_tokens=8)
+        @test t isa Task
+        @test_throws TaskFailedException fetch(t)
+    end
+
+    @testset "Two clients have independent RPM windows" begin
+        c1 = AnthropicClient(api_key="dummy", rpm=2)
+        c2 = AnthropicClient(api_key="dummy", rpm=2)
+        await_slot!(c1)
+        await_slot!(c1)
+        @test length(c1.rpm_window[]) == 2
+        @test length(c2.rpm_window[]) == 0
+        await_slot!(c2)
+        @test length(c1.rpm_window[]) == 2
+        @test length(c2.rpm_window[]) == 1
     end
 
 end

@@ -50,3 +50,12 @@ function calc_cost(model::AbstractString, input::Integer, cached_read::Integer,
             cached_write * p.cache_write  +
             output       * p.output) / 1_000_000
 end
+
+"""
+    known_models() -> Vector{String}
+
+Sorted list of every model identifier in the bundled pricing table. Use
+this to discover what `model_default` values are billable without falling
+back to the Sonnet default.
+"""
+known_models() = sort!(collect(keys(_PRICES)))

@@ -47,6 +47,16 @@ end
 "Has-key sanity check. Stub mode is when no api_key is set."
 has_key(c::AnthropicClient) = !isempty(c.api_key)
 
+# Custom show — never leak the api_key in a repr or error message.
+function Base.show(io::IO, c::AnthropicClient)
+    masked = isempty(c.api_key) ? "<unset>" :
+             length(c.api_key) <= 8 ? "***" :
+             string(first(c.api_key, 4), "…", last(c.api_key, 4))
+    print(io, "AnthropicClient(api_key=", masked,
+              ", model_default=", repr(c.model_default),
+              ", rpm=", c.rpm, ")")
+end
+
 # A message is one (role, content) pair. content can carry an optional cache
 # breakpoint (Anthropic's prompt-cache control).
 """
@@ -103,6 +113,15 @@ struct Reply
     output_tokens::Int
     cost_usd::Float64
     raw::Any                        # full JSON response (JSON3.Object), kept for debugging
+end
+
+function Base.show(io::IO, r::Reply)
+    snippet = length(r.text) <= 40 ? r.text : string(first(r.text, 37), "...")
+    print(io, "Reply(", repr(snippet),
+              ", model=", repr(r.model),
+              ", in=", r.input_tokens,
+              ", out=", r.output_tokens,
+              ", \$", round(r.cost_usd; digits=6), ")")
 end
 
 """

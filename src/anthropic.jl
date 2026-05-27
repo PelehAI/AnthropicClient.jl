@@ -89,7 +89,7 @@ function parse_reply(json, model_requested::AbstractString)
                   sr_raw == "tool_use"      ? :tool_use :
                                               :other
 
-    usage = json["usage"]
+    usage = get(json, "usage", Dict{String,Any}())
     input_tokens        = Int(get(usage, "input_tokens", 0))
     cached_read_tokens  = Int(get(usage, "cache_read_input_tokens", 0))
     cached_write_tokens = Int(get(usage, "cache_creation_input_tokens", 0))
@@ -141,7 +141,7 @@ function post_messages(client::AnthropicClient, body::AbstractDict; max_retries:
                 rethrow(e)
             end
             # Network-level errors → backoff + retry.
-            sleep(2.0 ^ attempt)
+            sleep(min(2.0 ^ attempt, 30.0))
             continue
         end
         if resp.status == 200
@@ -158,7 +158,7 @@ function post_messages(client::AnthropicClient, body::AbstractDict; max_retries:
             if attempt > max_retries
                 error("LLMClient: server error $(resp.status) after $max_retries retries: $(String(resp.body))")
             end
-            sleep(2.0 ^ attempt)
+            sleep(min(2.0 ^ attempt, 30.0))
             continue
         else
             # 4xx that isn't 429 — surface the body, don't retry.

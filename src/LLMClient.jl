@@ -1,8 +1,7 @@
 module LLMClient
 
 # LLMClient.jl — minimal, fast Julia client for Anthropic's Messages API.
-# See README.md for the design rationale; see ../../ENGINE_PHASE_2.md for
-# the broader context within Peleh.
+# See README.md for the design rationale.
 
 using HTTP
 using JSON3
@@ -19,7 +18,7 @@ export AnthropicClient, has_key,
        Reply,
        Budget, BudgetExceeded, spent_usd,
        chat, chat_async,
-       calc_cost, price_for
+       calc_cost, price_for, known_models
 
 """
     chat(client; system=nothing, messages, max_tokens, model=nothing,

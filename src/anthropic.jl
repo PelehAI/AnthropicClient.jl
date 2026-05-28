@@ -50,9 +50,8 @@ end
 function _serialize_messages(messages::AbstractVector{Msg})
     out = Vector{Dict{String,Any}}(undef, length(messages))
     for (i, m) in pairs(messages)
-        role = m.role === :user ? "user" :
-               m.role === :assistant ? "assistant" :
-               error("AnthropicClient: unknown role $(m.role); expected :user or :assistant")
+        # Role is validated at Msg construction time, so this is total.
+        role = m.role === :user ? "user" : "assistant"
         block = Dict{String,Any}("type" => "text", "text" => m.content)
         if m.cache
             block["cache_control"] = Dict{String,Any}("type" => "ephemeral")
@@ -106,9 +105,9 @@ end
 
 # ---- HTTP transport --------------------------------------------------------
 
-# Single shared HTTP connection pool for the package. HTTP.jl reuses
-# connections automatically per (scheme, host, port) within a process.
-const _HTTP_KEEPALIVE = Ref(true)
+# HTTP.jl maintains a per-(scheme, host, port) keep-alive pool within a
+# process, so consecutive calls to /v1/messages share connections without
+# any extra wiring on our side.
 
 """
     post_messages(client, body; max_retries=3)
@@ -120,7 +119,7 @@ Issue one POST to `/v1/messages` with the standard headers. Handles
 `build_body`).
 """
 function post_messages(client::Client, body::AbstractDict; max_retries::Integer=3)
-    has_key(client) || error("AnthropicClient: ANTHROPIC_API_KEY not set on client")
+    has_key(client) || throw(ArgumentError("ANTHROPIC_API_KEY not set on client"))
     url = string(client.base_url, "/v1/messages")
     headers = [
         "x-api-key"         => client.api_key,
@@ -151,19 +150,25 @@ function post_messages(client::Client, body::AbstractDict; max_retries::Integer=
             # Rate limit. Honour retry-after if present, else exponential backoff.
             retry_after = _retry_after_seconds(resp)
             if attempt > max_retries
-                error("AnthropicClient: rate limit exceeded after $max_retries retries")
+                throw(AnthropicAPIError(429,
+                    "rate limit exceeded after $max_retries retries",
+                    String(resp.body)))
             end
             sleep(retry_after)
             continue
         elseif 500 <= resp.status < 600
             if attempt > max_retries
-                error("AnthropicClient: server error $(resp.status) after $max_retries retries: $(String(resp.body))")
+                throw(AnthropicAPIError(resp.status,
+                    "server error after $max_retries retries",
+                    String(resp.body)))
             end
             sleep(min(2.0 ^ attempt, 30.0))
             continue
         else
             # 4xx that isn't 429 — surface the body, don't retry.
-            error("AnthropicClient: HTTP $(resp.status) from /v1/messages: $(String(resp.body))")
+            throw(AnthropicAPIError(resp.status,
+                "non-recoverable HTTP error from /v1/messages",
+                String(resp.body)))
         end
     end
 end

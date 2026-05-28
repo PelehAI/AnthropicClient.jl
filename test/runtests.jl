@@ -110,15 +110,12 @@ using JSON3
         @test !haskey(body["messages"][2]["content"][1], "cache_control")
     end
 
-    @testset "build_body — unknown role errors" begin
-        client = Client(api_key="dummy")
-        @test_throws ErrorException build_body(client;
-            system = nothing,
-            messages = [Msg(:tool, "x")],
-            max_tokens = 32,
-            model = nothing,
-            temperature = nothing,
-        )
+    @testset "Msg — unknown role rejected at construction" begin
+        @test_throws ArgumentError Msg(:tool, "x")
+        @test_throws ArgumentError Msg(:system, "x")    # system uses SystemPrompt, not Msg
+        # Valid roles still work.
+        @test Msg(:user, "x").role === :user
+        @test Msg(:assistant, "x").role === :assistant
     end
 
     @testset "parse_reply — canonical response shape" begin
@@ -238,14 +235,14 @@ using JSON3
         @test  has_key(Client(api_key="sk-ant-anything"))
     end
 
-    @testset "chat — keyless client errors" begin
+    @testset "chat — keyless client errors with ArgumentError" begin
         client = Client(api_key="")
-        @test_throws ErrorException chat(client; messages=[(:user, "x")], max_tokens=8)
+        @test_throws ArgumentError chat(client; messages=[(:user, "x")], max_tokens=8)
     end
 
-    @testset "chat — missing messages errors" begin
+    @testset "chat — missing messages errors with ArgumentError" begin
         client = Client(api_key="dummy")
-        @test_throws ErrorException chat(client; max_tokens=8)
+        @test_throws ArgumentError chat(client; max_tokens=8)
     end
 
     @testset "parse_reply — stop_reason variants" begin
@@ -484,6 +481,32 @@ using JSON3
         @test e.used_usd == 0.5
         @test e.max_usd  == 0.3
         @test e.attempt_cost_usd == 0.2
+    end
+
+    @testset "AnthropicAPIError — construction + showerror" begin
+        e1 = AnthropicAPIError(429, "rate limit hit", "")
+        @test e1.status == 429
+        @test e1.message == "rate limit hit"
+        @test isempty(e1.response_body)
+
+        # Convenience constructor without body.
+        e2 = AnthropicAPIError(500, "internal")
+        @test e2.response_body == ""
+
+        # showerror includes status and message.
+        io = IOBuffer(); showerror(io, e1)
+        s = String(take!(io))
+        @test occursin("429", s)
+        @test occursin("rate limit hit", s)
+        @test occursin("AnthropicAPIError", s)
+
+        # showerror with body shows a truncated snippet.
+        e3 = AnthropicAPIError(400, "bad request", "x" ^ 500)
+        io = IOBuffer(); showerror(io, e3)
+        s3 = String(take!(io))
+        @test occursin("bad request", s3)
+        @test occursin("...", s3)               # body truncation indicator
+        @test length(s3) < 400                   # not the full 500-char body
     end
 
 end

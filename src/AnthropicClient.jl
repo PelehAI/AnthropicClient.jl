@@ -1,6 +1,14 @@
+"""
+    AnthropicClient
+
+Julia client for Anthropic's Messages API. Construct a [`Client`](@ref),
+call [`chat`](@ref) or [`chat_async`](@ref), inspect [`Reply`](@ref).
+See the [README](https://github.com/PelehAI/AnthropicClient.jl) for the
+full guide.
+"""
 module AnthropicClient
 
-# AnthropicClient.jl — minimal, fast Julia client for Anthropic's Messages API.
+# Minimal, fast Julia client for Anthropic's Messages API.
 # See README.md for the design rationale.
 
 using HTTP
@@ -17,6 +25,7 @@ export Client, has_key,
        Msg, SystemPrompt,
        Reply,
        Budget, BudgetExceeded, spent_usd,
+       AnthropicAPIError,
        chat, chat_async,
        calc_cost, price_for, known_models
 
@@ -45,7 +54,7 @@ function chat(client::Client;
     temperature::Union{Nothing, Real}     = nothing,
     max_retries::Integer = 3,
 )
-    messages === nothing && error("AnthropicClient.chat: `messages` is required")
+    messages === nothing && throw(ArgumentError("chat: `messages` is required"))
     msgs_normalized = Msg[to_msg(m) for m in messages]
     sys_normalized  = to_system(system)
     body = build_body(client;

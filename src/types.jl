@@ -72,7 +72,11 @@ struct Msg
     content::String
     cache::Bool
 end
-Msg(role::Symbol, content::AbstractString; cache::Bool=false) = Msg(role, String(content), cache)
+function Msg(role::Symbol, content::AbstractString; cache::Bool=false)
+    role in (:user, :assistant) ||
+        throw(ArgumentError("Msg: role must be :user or :assistant, got :$role"))
+    return Msg(role, String(content), cache)
+end
 
 # Sugar so callers can use tuples or Pair where clarity wins.
 to_msg(m::Msg) = m
@@ -151,3 +155,25 @@ Base.showerror(io::IO, e::BudgetExceeded) = print(io,
     "BudgetExceeded: already spent \$", round(e.used_usd; digits=4),
     ", cap is \$", round(e.max_usd; digits=4),
     ", this call would add \$", round(e.attempt_cost_usd; digits=4))
+
+"""
+    AnthropicAPIError(status, message, response_body)
+
+Thrown by `chat` when the Anthropic API returns a non-recoverable HTTP
+error, or when retries are exhausted on 429 / 5xx. `status` is the last
+seen HTTP status (0 if the failure was network-level), `message` is a
+short human-readable label, and `response_body` carries the raw response
+body if any (often empty for network errors).
+"""
+struct AnthropicAPIError <: Exception
+    status::Int
+    message::String
+    response_body::String
+end
+AnthropicAPIError(status::Integer, message::AbstractString) =
+    AnthropicAPIError(Int(status), String(message), "")
+Base.showerror(io::IO, e::AnthropicAPIError) = print(io,
+    "AnthropicAPIError(status=", e.status, "): ", e.message,
+    isempty(e.response_body) ? "" :
+        string(" — body: ", first(e.response_body, 200),
+               length(e.response_body) > 200 ? "..." : ""))

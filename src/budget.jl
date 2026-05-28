@@ -1,5 +1,10 @@
-# Budget bookkeeping for cap-enforced sessions.
+# Budget polymorphism + bookkeeping for cap-enforced sessions.
 #
+# Callers that accept either a Client or a Budget (the engine's phase
+# entry points keep `client` untyped) need `has_key` to resolve through
+# a Budget wrapper. Forward to the wrapped Client.
+has_key(b::Budget) = has_key(b.client)
+
 # `chat(client; ...)`  → no cap, just bills.
 # `chat(budget; ...)`  → checks cap before issuing, throws BudgetExceeded if
 #                        adding this call's actual cost would push over. We

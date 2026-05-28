@@ -212,12 +212,12 @@ using JSON3
         # that the window state evolves correctly under instant calls:
         await_slot!(client)
         await_slot!(client)
-        @test length(client.rpm_window[]) == 2
+        @test length(client.rpm_window) == 2
         # A 3rd call would block ~60s. Don't actually wait; test the state
         # logic by manually evicting one entry and checking it proceeds.
-        client.rpm_window[][1] = time() - 100  # mark old
+        client.rpm_window[1] = time() - 100  # mark old
         await_slot!(client)                    # should evict + proceed
-        @test length(client.rpm_window[]) == 2
+        @test length(client.rpm_window) == 2
     end
 
     @testset "Budget — under cap accepts" begin
@@ -404,11 +404,86 @@ using JSON3
         c2 = Client(api_key="dummy", rpm=2)
         await_slot!(c1)
         await_slot!(c1)
-        @test length(c1.rpm_window[]) == 2
-        @test length(c2.rpm_window[]) == 0
+        @test length(c1.rpm_window) == 2
+        @test length(c2.rpm_window) == 0
         await_slot!(c2)
-        @test length(c1.rpm_window[]) == 2
-        @test length(c2.rpm_window[]) == 1
+        @test length(c1.rpm_window) == 2
+        @test length(c2.rpm_window) == 1
+    end
+
+    @testset "RPM semaphore — concurrent callers stay under cap" begin
+        # Spawn N tasks racing for a 5-slot window; verify the window's
+        # length never exceeds the cap while filling.
+        client = Client(api_key="dummy", rpm=5)
+        tasks = [Threads.@spawn await_slot!(client) for _ in 1:5]
+        foreach(wait, tasks)
+        @test length(client.rpm_window) == 5
+        @test all(t -> time() - t < 1.0, client.rpm_window)
+    end
+
+    @testset "parse_reply — empty / missing content" begin
+        # Missing content key entirely.
+        json = JSON3.read("""
+        {"model":"claude-haiku-4-5","stop_reason":"end_turn",
+         "usage":{"input_tokens":1,"output_tokens":1}}
+        """)
+        rep = parse_reply(json, "claude-haiku-4-5")
+        @test rep.text == ""
+
+        # Empty content array.
+        json2 = JSON3.read("""
+        {"model":"claude-haiku-4-5","content":[],"stop_reason":"end_turn",
+         "usage":{"input_tokens":1,"output_tokens":1}}
+        """)
+        @test parse_reply(json2, "claude-haiku-4-5").text == ""
+    end
+
+    @testset "parse_reply — many text blocks (no quadratic regression)" begin
+        # If text concat is O(n²) this stalls; with IOBuffer it's O(n).
+        n = 500
+        blocks_json = join(["""{"type":"text","text":"x"}""" for _ in 1:n], ",")
+        json = JSON3.read("""
+        {"model":"claude-haiku-4-5","content":[$blocks_json],
+         "stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}
+        """)
+        rep = parse_reply(json, "claude-haiku-4-5")
+        @test length(rep.text) == n
+        @test rep.text == "x" ^ n
+    end
+
+    @testset "known_models — every entry has positive prices and no warn-fallback" begin
+        ms = known_models()
+        @test !isempty(ms)
+        for m in ms
+            # Should NOT trip the warn fallback for known models.
+            p = @test_nowarn price_for(m)
+            @test p.input        > 0
+            @test p.cache_read   > 0
+            @test p.cache_write  > 0
+            @test p.output       > 0
+        end
+    end
+
+    @testset "_retry_after_seconds — out-of-range values use default" begin
+        for bad in ["-1", "-0.5", "0", "abc", "1e400"]
+            resp = HTTP.Response(429, ["retry-after" => bad]; body=UInt8[])
+            @test _retry_after_seconds(resp) == 5.0
+        end
+    end
+
+    @testset "Budget — used_usd is mutable; replies accumulate" begin
+        # Direct field write — Budget is mutable by design.
+        client = Client(api_key="dummy")
+        b = Budget(client; max_usd=1.0)
+        b.used_usd = 0.42
+        @test spent_usd(b) == 0.42
+    end
+
+    @testset "BudgetExceeded — fields accessible" begin
+        e = BudgetExceeded(0.5, 0.3, 0.2)
+        @test e.used_usd == 0.5
+        @test e.max_usd  == 0.3
+        @test e.attempt_cost_usd == 0.2
     end
 
 end

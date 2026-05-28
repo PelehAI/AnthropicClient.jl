@@ -1,5 +1,8 @@
 # AnthropicClient.jl
 
+[![CI](https://github.com/PelehAI/AnthropicClient.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/PelehAI/AnthropicClient.jl/actions/workflows/CI.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Julia client for [Anthropic's Messages API](https://docs.anthropic.com/en/api/messages).
 Anthropic-only, by design. Built for long-running batch and pipeline
 workloads where prompt caching, rate limiting, and cost accounting are

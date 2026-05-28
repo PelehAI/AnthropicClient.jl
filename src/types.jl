@@ -1,4 +1,4 @@
-# Core types: Client, Message, Reply, Budget.
+# Core types: Client, Msg, SystemPrompt, Reply, Budget, BudgetExceeded.
 
 """
     Client(; api_key, model_default, rpm, base_url, timeout)
@@ -21,8 +21,9 @@ struct Client
     rpm::Int
     base_url::String
     timeout::Int
-    # RPM sliding window: timestamps of recent calls.
-    rpm_window::Ref{Vector{Float64}}
+    # RPM sliding window: timestamps of recent calls. Vector is mutable
+    # through its reference, so no Ref wrapper needed.
+    rpm_window::Vector{Float64}
     rpm_lock::ReentrantLock
 end
 
@@ -39,7 +40,7 @@ function Client(;
         Int(rpm),
         String(base_url),
         Int(timeout),
-        Ref(Float64[]),
+        Float64[],
         ReentrantLock(),
     )
 end

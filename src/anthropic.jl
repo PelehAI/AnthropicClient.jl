@@ -75,13 +75,14 @@ function parse_reply(json, model_requested::AbstractString)
     #                        stop_reason, usage: {input_tokens, cache_creation_input_tokens,
     #                                              cache_read_input_tokens, output_tokens}}
     model_in_resp = haskey(json, "model") ? String(json["model"]) : String(model_requested)
-    content_blocks = json["content"]
-    text = ""
+    content_blocks = get(json, "content", ())
+    io = IOBuffer()
     for blk in content_blocks
         if haskey(blk, "type") && blk["type"] == "text"
-            text *= String(blk["text"])
+            write(io, blk["text"])
         end
     end
+    text = String(take!(io))
     sr_raw = get(json, "stop_reason", "other")
     stop_reason = sr_raw == "end_turn"      ? :end_turn :
                   sr_raw == "max_tokens"    ? :max_tokens :
@@ -145,7 +146,7 @@ function post_messages(client::Client, body::AbstractDict; max_retries::Integer=
             continue
         end
         if resp.status == 200
-            return JSON3.read(String(resp.body))
+            return JSON3.read(resp.body)
         elseif resp.status == 429
             # Rate limit. Honour retry-after if present, else exponential backoff.
             retry_after = _retry_after_seconds(resp)

@@ -60,11 +60,11 @@ function chat(client::Client;
 end
 
 """
-    chat_async(client; kwargs...) -> Task{Reply}
+    chat_async(client; kwargs...) -> Task
 
-Returns a Task running `chat` on a background thread. The task respects the
-client's RPM cap through the shared semaphore — many concurrent tasks share
-one rate budget.
+Spawn `chat` on a background thread; `fetch(task)` returns the `Reply`.
+The task respects the client's RPM cap through the shared semaphore —
+many concurrent tasks share one rate budget.
 """
 function chat_async(client::Client; kwargs...)
     Threads.@spawn chat(client; kwargs...)

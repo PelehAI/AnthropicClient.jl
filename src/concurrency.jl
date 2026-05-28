@@ -19,7 +19,7 @@ function await_slot!(client::Client)
         wait_secs = lock(client.rpm_lock) do
             now = time()
             cutoff = now - _RPM_WINDOW_SECONDS
-            w = client.rpm_window[]
+            w = client.rpm_window
             # Evict expired
             i = 1
             while i <= length(w) && w[i] < cutoff
